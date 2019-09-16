@@ -1,14 +1,18 @@
-FROM nginx:1.15.2-alpine
+FROM nginx:1.17.3-alpine
+
+RUN apk update --no-cache && \
+    apk upgrade --no-cache && \
+    apk add --no-cache openssl
 
 COPY rootfs /
 
-RUN apk add openssl && \
-    mkdir /etc/nginx/ssl
+RUN mkdir /etc/nginx/ssl
 
-ENTRYPOINT openssl req \
+ENTRYPOINT \
+  openssl req \
     -subj '/CN=localhost' \
     -x509 -newkey rsa:4096 \
-    -nodes -keyout /etc/nginx/ssl/key.pem \
-    -out /etc/nginx/ssl/cert.pem \
+    -nodes -keyout /etc/nginx/ssl/default_key.pem \
+    -out /etc/nginx/ssl/default_cert.pem \
     -days 365 && \
-    nginx -g 'daemon off;'
+  nginx -g 'daemon off;'
