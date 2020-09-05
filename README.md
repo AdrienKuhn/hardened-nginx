@@ -10,3 +10,4 @@ Nginx hardened image based on `alpine` [nginx image](https://hub.docker.com/_/ng
 * Disabled some weak ciphers
 * Default self signed certificate is generated at start
 * Some performance optimization
+* Stream configuration
