@@ -8,6 +8,8 @@ COPY rootfs /
 
 RUN mkdir /etc/nginx/ssl
 
+EXPOSE 443
+
 ENTRYPOINT \
   openssl req \
     -subj '/CN=localhost' \
