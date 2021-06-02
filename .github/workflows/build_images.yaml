@@ -6,8 +6,10 @@ on:
     tags:
       - '*'
     branches:
-      - master
-      - develop
+      - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   docker:
@@ -61,6 +63,18 @@ jobs:
 
       - name: Build
         uses: docker/build-push-action@v2
+        if: github.event_name == 'pull_request'
+        with:
+          builder: ${{ steps.buildx.outputs.name }}
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: false
+          tags: ${{ steps.prep.outputs.tags }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v2
+        if: github.event_name != 'pull_request'
         with:
           builder: ${{ steps.buildx.outputs.name }}
           context: .
