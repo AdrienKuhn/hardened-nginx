@@ -1,0 +1,154 @@
+# See: https://circleci.com/docs/2.0/configuration-reference
+version: 2.1
+
+parameters:
+  image-name: 
+    default: krewh/hardened-nginx
+    type: string
+  platform:
+    default: linux/amd64,linux/arm64
+    type: string
+  docker-version:
+    default: 20.10.11
+    type: string
+
+commands:
+  # Login to Docker Hub
+  dockerhub-login:
+    steps:
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo "$DOCKERHUB_PASS" | docker login --username "$DOCKERHUB_USER" --password-stdin
+  # Get and export the current branch or current tag
+  get-branch-or-tag:
+    steps:
+      - run:
+          name: Get the branch or tag
+          command: |
+            REV="${CIRCLE_TAG:-$CIRCLE_BRANCH}"
+
+            if [ "$REV" == "main" ]; then
+              echo 'export TAG="latest"' >> $BASH_ENV
+            else
+              echo 'export TAG="${CIRCLE_TAG:-$CIRCLE_BRANCH}"' >> $BASH_ENV
+            fi
+  # Get the last tagged release
+  get-last-tag:
+    steps:
+      - run:
+          name: Get last tag
+          command: |
+            echo `git describe --tags --abbrev=0`
+            echo 'export LAST_TAG=`git describe --tags --abbrev=0`' >> $BASH_ENV
+  # Reset HEAD to a tag
+  reset-to-tag:
+    parameters:
+      tag:
+        type: string
+    steps:
+      - run:
+          name: Reset to tag
+          command: |
+            git reset --hard <<parameters.tag>>
+  # Build multiarch and push
+  buildx-push:
+    parameters:
+      tag:
+        type: string
+    steps:
+      - run:
+          name: Build and push Docker image
+          command: |
+            docker run \
+              --rm \
+              --privileged \
+              multiarch/qemu-user-static \
+              --reset \
+              -p yes
+            docker context create tls-environment
+            docker buildx create \
+              --name multiarch-builder \
+              --driver docker-container \
+              --use tls-environment
+            docker buildx build \
+              --push \
+              --no-cache \
+              --pull \
+              --platform <<pipeline.parameters.platform>> \
+              --tag <<pipeline.parameters.image-name>>:<<parameters.tag>> \
+              .
+
+jobs:
+  # Build image and push
+  build-and-push:
+    docker:
+      - image: cimg/base:2021.04
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASS
+    resource_class: small
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: <<pipeline.parameters.docker-version>>
+      - dockerhub-login
+      - get-branch-or-tag
+      - buildx-push:
+          tag: $TAG
+
+  # Refresh the last release
+  refresh-release:
+    docker:
+      - image: cimg/base:2021.04
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASS
+    resource_class: small
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: <<pipeline.parameters.docker-version>>
+      - dockerhub-login
+      - get-last-tag
+      - reset-to-tag:
+          tag: $LAST_TAG
+      - buildx-push:
+          tag: $LAST_TAG
+
+workflows:
+  # Build pushes on branches and tags
+  # Don't run for shceduled pipelines
+  build:
+    when:
+      not:
+        and:
+          - equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+    jobs:
+      - build-and-push:
+          context:
+            - docker-hub-creds
+          filters:
+            branches:
+              only: /.*/ # Include all branches
+            tags:
+              only: /.*/ # Include all tags
+  
+  # Rebuild the last tag
+  # Will run only for scheduled pipeline.
+  # See: https://circleci.com/docs/2.0/scheduled-pipelines
+  refresh:
+    when:
+      and:
+        - equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+        # We could filter on trigger name here
+    jobs:
+      - build-and-push:
+          context:
+            - docker-hub-creds
+          filters:
+            branches:
+              only: main # Include main branch
+      - refresh-release:
+          context:
+            - docker-hub-creds
