@@ -1,6 +1,6 @@
 # hardened-nginx
 
-[![CircleCI](https://circleci.com/gh/AdrienKuhn/hardened-nginx/tree/main.svg?style=shield)](https://circleci.com/gh/AdrienKuhn/hardened-nginx/tree/main)
+![CircleCI](https://circleci.com/gh/AdrienKuhn/hardened-nginx/tree/main.svg?style=shield)
 
 Nginx hardened image based on `alpine` [nginx image](https://hub.docker.com/_/nginx).
 
