@@ -2,15 +2,24 @@
 version: 2.1
 
 parameters:
-  image-name: 
+  default-tag:
+    default: 0.0.1
+    type: string
+  docker-version:
+    default: 20.10.11
+    type: string
+  github-cli-version:
+    default: 2.7.0
+    type: string
+  image-name:
     default: krewh/hardened-nginx
     type: string
   platform:
     default: linux/amd64,linux/arm64
     type: string
-  docker-version:
-    default: 20.10.11
-    type: string
+
+orbs:
+  gh: circleci/github-cli@2.1.0
 
 commands:
   # Login to Docker Hub
@@ -20,6 +29,7 @@ commands:
           name: Login to Docker Hub
           command: |
             echo "$DOCKERHUB_PASS" | docker login --username "$DOCKERHUB_USER" --password-stdin
+
   # Get and export the current branch or current tag
   get-branch-or-tag:
     steps:
@@ -33,6 +43,7 @@ commands:
             else
               echo 'export TAG="${CIRCLE_TAG:-$CIRCLE_BRANCH}"' >> $BASH_ENV
             fi
+
   # Get the last tagged release
   get-last-tag:
     steps:
@@ -41,17 +52,20 @@ commands:
           command: |
             echo `git describe --tags --abbrev=0`
             echo 'export LAST_TAG=`git describe --tags --abbrev=0`' >> $BASH_ENV
+
   # Reset HEAD to a tag
   reset-to-tag:
     parameters:
       tag:
+        description: The tag to reset to
         type: string
     steps:
       - run:
           name: Reset to tag
           command: |
             git reset --hard <<parameters.tag>>
-  # Build multiarch and push
+
+  # Build for multiarch and push
   buildx-push:
     parameters:
       tag:
@@ -79,8 +93,31 @@ commands:
               --tag <<pipeline.parameters.image-name>>:<<parameters.tag>> \
               .
 
+  # Bump tag
+  bump-tag:
+    steps:
+      - run:
+          name: Bump tag
+          command: |
+            if [ -z ${LAST_TAG} ]; then
+              echo <<pipeline.parameters.default-tag>>
+              echo "export NEW_TAG=<<pipeline.parameters.default-tag>>" >> $BASH_ENV;
+            else
+              echo $(echo ${LAST_TAG} | awk -F. -v OFS=. '{$NF += 1 ; print}')
+              echo "export NEW_TAG=`echo $(echo ${LAST_TAG} | awk -F. -v OFS=. '{$NF += 1 ; print}')`" >> $BASH_ENV
+            fi
+
+  # Create a GitHub release
+  create-release:
+    steps:
+      - run:
+          name: Create GitHub release
+          command: |
+            echo $NEW_TAG
+            gh release create $NEW_TAG --generate-notes
+
 jobs:
-  # Build image and push
+  # Build for multiarch and push
   build-and-push:
     docker:
       - image: cimg/base:2021.04
@@ -97,7 +134,7 @@ jobs:
       - buildx-push:
           tag: $TAG
 
-  # Refresh the last release
+  # Refresh the last release docker image
   refresh-release:
     docker:
       - image: cimg/base:2021.04
@@ -116,9 +153,27 @@ jobs:
       - buildx-push:
           tag: $LAST_TAG
 
+  # Create GitHub release
+  create-release:
+    docker:
+      - image: cimg/base:2021.04
+        auth:
+          username: $DOCKERHUB_USER
+          password: $DOCKERHUB_PASS
+    resource_class: small
+    steps:
+      - checkout
+      - setup_remote_docker:
+          version: <<pipeline.parameters.docker-version>>
+      - get-last-tag
+      - bump-tag
+      - gh/install:
+          version: <<pipeline.parameters.github-cli-version>>
+      - create-release
+
 workflows:
   # Build pushes on branches and tags
-  # Don't run for shceduled pipelines
+  # Don't run for scheduled pipelines
   build:
     when:
       not:
@@ -133,6 +188,21 @@ workflows:
               only: /.*/ # Include all branches
             tags:
               only: /.*/ # Include all tags
+
+  # Create a new GitHub release
+  # Run only for pushes on main and don't run for scheduled pipelines
+  release:
+    when:
+      not:
+        and:
+          - equal: [ scheduled_pipeline, << pipeline.trigger_source >> ]
+    jobs:
+      - create-release:
+          context:
+            - github-creds
+          filters:
+            branches:
+              only: main # Only the main branch
   
   # Rebuild the last tag
   # Will run only for scheduled pipeline.
