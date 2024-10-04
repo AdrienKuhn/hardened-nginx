@@ -6,7 +6,7 @@ parameters:
     default: 0.0.1
     type: string
   docker-version:
-    default: 20.10.11
+    default: default
     type: string
   github-cli-version:
     default: 2.7.0
